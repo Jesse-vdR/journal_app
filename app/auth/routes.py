@@ -34,10 +34,17 @@ def register():
         return redirect(url_for('main.index'))
     form = RegistrationForm()
     if form.validate_on_submit():
-        user = User(username=form.username.data, email=form.email.data)
-        user.set_password(form.password.data)
-        db.session.add(user)
-        db.session.commit()
-        flash('Congratulations, you are now a registered user!', 'success')
-        return redirect(url_for('auth.login'))
+        try:
+            user = User(username=form.username.data, email=form.email.data)
+            user.set_password(form.password.data)
+            db.session.add(user)
+            db.session.commit()
+            flash('Congratulations, you are now a registered user!', 'success')
+            return redirect(url_for('auth.login'))
+        except ValueError as e:
+            flash(str(e), 'error')
+            current_app.logger.error(f"Error registering user: {str(e)}")
+        except Exception as e:
+            flash('Error registering user. Please try again.', 'error')
+            current_app.logger.error(f"Error registering user: {str(e)}")
     return render_template('auth/register.html', title='Register', form=form)

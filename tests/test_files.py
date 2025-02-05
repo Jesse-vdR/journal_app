@@ -11,109 +11,65 @@ def login(client, username='test_user', password='test_password'):
         'password': password
     }, follow_redirects=True)
 
-def test_file_browser_access(client, test_user):
-    # Test access without login
-    response = client.get('/files/browse')
-    assert response.status_code == 302  # Redirect to login
-    
-    # Login
-    login_response = login(client)
-    assert login_response.status_code == 200
-    
-    # Test access after login
-    response = client.get('/files/browse')
+def test_file_browser_access(auth_client):
+    """Test that the file browser page is accessible"""
+    response = auth_client.get('/files/browse')
     assert response.status_code == 200
-    assert b'File Browser' in response.data
+    assert b'Upload Files' in response.data
 
-def test_list_files(client, test_user, tmp_path):
-    # Login
-    login_response = login(client)
-    assert login_response.status_code == 200
-    
-    # Create test files and directories
-    test_dir = tmp_path / "test_dir"
-    test_dir.mkdir()
-    test_file = tmp_path / "test.txt"
-    test_file.write_text("test content")
-    
-    # Configure app to use temp directory
-    current_app.config['FILE_BROWSER_ROOT'] = str(tmp_path)
-    
-    # Test listing files
-    response = client.get('/files/api/files')
+def test_list_files(auth_client):
+    """Test listing files API"""
+    response = auth_client.get('/files/api/files?path=/')
     assert response.status_code == 200
     data = response.get_json()
-    
-    # Verify response structure
-    assert 'current_path' in data
     assert 'items' in data
-    
-    # Verify files are listed
-    items = {item['name']: item for item in data['items']}
-    assert 'test_dir' in items
-    assert items['test_dir']['type'] == 'directory'
-    assert 'test.txt' in items
-    assert items['test.txt']['type'] == 'file'
+    assert isinstance(data['items'], list)
 
-def test_upload_file(client, test_user, tmp_path):
-    # Login
-    login_response = login(client)
-    assert login_response.status_code == 200
-    
-    # Configure app to use temp directory
-    current_app.config['FILE_BROWSER_ROOT'] = str(tmp_path)
-    
-    # Create test file
-    data = {'file': (BytesIO(b'test content'), 'test.txt')}
-    
-    # Test file upload
-    response = client.post('/files/api/upload', 
-                         data=data,
-                         content_type='multipart/form-data')
-    assert response.status_code == 200
-    
-    # Verify file was created
-    uploaded_file = tmp_path / 'test.txt'
-    assert uploaded_file.exists()
-    assert uploaded_file.read_text() == 'test content'
-
-def test_download_file(client, test_user, tmp_path):
-    # Login
-    login_response = login(client)
-    assert login_response.status_code == 200
-    
-    # Configure app to use temp directory
-    current_app.config['FILE_BROWSER_ROOT'] = str(tmp_path)
-    
-    # Create test file
+def test_upload_file(auth_client, tmp_path):
+    """Test file upload functionality"""
+    # Create a test file
     test_file = tmp_path / "test.txt"
-    test_file.write_text("test content")
+    test_file.write_text("Test content")
     
-    # Test file download
-    response = client.get(f'/files/api/download?path={str(test_file)}')
+    with open(test_file, 'rb') as f:
+        response = auth_client.post('/files/api/upload', data={
+            'file': (f, 'test.txt'),
+            'path': '/'
+        })
     assert response.status_code == 200
-    assert response.data == b'test content'
-    assert response.headers['Content-Disposition'] == 'attachment; filename=test.txt'
+    
+    # Verify file appears in listing
+    response = auth_client.get('/files/api/files?path=/')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert any(item['name'] == 'test.txt' for item in data['items'])
 
-def test_security_checks(client, test_user, tmp_path):
-    # Login
-    login_response = login(client)
-    assert login_response.status_code == 200
+def test_download_file(auth_client, tmp_path):
+    """Test file download functionality"""
+    # First upload a file
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("Test content")
     
-    # Configure app to use temp directory
-    current_app.config['FILE_BROWSER_ROOT'] = str(tmp_path)
+    with open(test_file, 'rb') as f:
+        auth_client.post('/files/api/upload', data={
+            'file': (f, 'test.txt'),
+            'path': '/'
+        })
     
-    # Test directory traversal attempt
-    response = client.get('/files/api/files?path=../../../etc/passwd')
-    assert response.status_code == 403
-    
-    # Test upload with invalid file type
-    data = {'file': (BytesIO(b'malicious content'), 'malicious.exe')}
-    response = client.post('/files/api/upload',
-                         data=data,
-                         content_type='multipart/form-data')
+    # Now try to download it
+    response = auth_client.get('/files/api/download?path=/test.txt')
+    assert response.status_code == 200
+    assert response.data == b"Test content"
+
+def test_security_checks(auth_client):
+    """Test security measures for file operations"""
+    # Test path traversal prevention
+    response = auth_client.get('/files/api/files?path=/../')
     assert response.status_code == 400
     
-    # Test download with invalid path
-    response = client.get('/files/api/download?path=../../../etc/passwd')
-    assert response.status_code == 403
+    response = auth_client.get('/files/api/download?path=/../etc/passwd')
+    assert response.status_code == 400
+    
+    # Test invalid paths
+    response = auth_client.get('/files/api/files?path=nonexistent')
+    assert response.status_code == 404

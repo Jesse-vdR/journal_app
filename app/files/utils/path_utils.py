@@ -11,7 +11,8 @@ def normalize_path(path):
 
 def get_user_base_dir():
     """Get the base directory for the current user's files"""
-    base_dir = os.path.join(current_app.static_folder, 'uploads', str(current_user.id))
+    # Use FILE_BROWSER_ROOT from config instead of static_folder
+    base_dir = os.path.join(current_app.config['FILE_BROWSER_ROOT'], str(current_user.id))
     if not os.path.exists(base_dir):
         os.makedirs(base_dir)
     return base_dir
