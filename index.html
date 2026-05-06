@@ -34,20 +34,12 @@
   <div id="settings" hidden>
     <h2>Settings</h2>
 
-    <label for="pat-input">GitHub personal access token</label>
-    <input type="password" id="pat-input" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+    <h3>Signed in as</h3>
+    <p id="me-view" class="help">—</p>
     <div class="row">
-      <button id="pat-save" class="primary">Save</button>
-      <button id="pat-clear" class="danger">Clear token</button>
+      <button id="signout-btn" class="danger">Sign out</button>
       <button id="settings-close">Close</button>
     </div>
-
-    <p class="help">
-      Create a <strong>fine-grained</strong> personal access token at
-      <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">github.com/settings/personal-access-tokens</a>,
-      scoped to <code>Jesse-vdR/Jesse</code> only, with <code>Contents: Read and write</code>.
-      The token is stored only in this browser's localStorage for this origin; it is never sent anywhere except api.github.com.
-    </p>
 
     <h3>Pending</h3>
     <pre id="pending-view">—</pre>

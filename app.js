@@ -2,40 +2,27 @@
   'use strict';
 
   // ====== CONFIG ======
-  const CFG = {
-    owner: 'Jesse-vdR',
-    repo: 'Jesse',
-    branch: 'main',
-    entriesPath: 'journal/entries.jsonl',
-    audioDir: 'journal/audio',
-  };
-  const API = `https://api.github.com/repos/${CFG.owner}/${CFG.repo}`;
+  const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:8000'
+    : 'https://api.jesselab.space';
+  const APEX = 'https://jesselab.space/';
 
   // ====== STATE ======
   const state = {
-    pat: localStorage.getItem('pat') || '',
     pending: loadPending(),     // queue of {kind, entry, audioBlob?, audioName?, audioMime?}
     recording: null,            // {recorder, chunks, mime, ext, startedAt, timerId}
+    me: null,                   // {user_id, email, display_name} once signed in
   };
 
   // ====== STORAGE ======
   function loadPending() {
-    try {
-      const raw = JSON.parse(localStorage.getItem('pending') || '[]');
-      // Audio blobs can't be JSON-serialized; we only persist text-only items here.
-      // In-memory pending may also include audio items that haven't been persisted.
-      return raw;
-    } catch { return []; }
+    try { return JSON.parse(localStorage.getItem('pending') || '[]'); }
+    catch { return []; }
   }
   function savePending() {
-    // Persist only text items; audio is lost on reload (held in memory only) — see README.
+    // Audio blobs can't be JSON-serialized — text-only items survive a reload.
     const persistable = state.pending.filter((p) => p.kind === 'text');
     localStorage.setItem('pending', JSON.stringify(persistable));
-  }
-  function savePat(pat) {
-    state.pat = pat;
-    if (pat) localStorage.setItem('pat', pat);
-    else localStorage.removeItem('pat');
   }
 
   // ====== DATE HELPERS ======
@@ -44,66 +31,43 @@
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
-  function fileSafeIso() {
-    return nowIso().replace(/[:.]/g, '-');
+
+  // ====== API ======
+  async function fetchMe() {
+    const r = await fetch(`${API_BASE}/v1/me`, { credentials: 'include' });
+    if (r.status === 401) return null;
+    if (!r.ok) throw new Error(`/v1/me: ${r.status}`);
+    return r.json();
   }
 
-  // ====== GITHUB API ======
-  async function ghGet(path) {
-    const r = await fetch(`${API}/contents/${path}?ref=${CFG.branch}`, {
-      headers: {
-        Authorization: `Bearer ${state.pat}`,
-        Accept: 'application/vnd.github+json',
-      },
+  async function postEntry(p) {
+    const fd = new FormData();
+    fd.set('kind', p.entry.kind);
+    fd.set('ts', p.entry.ts);
+    fd.set('local_date', p.entry.local_date);
+    if (p.entry.body) fd.set('body', p.entry.body);
+    if (p.audioBlob) fd.append('audio', p.audioBlob, p.audioName);
+    const r = await fetch(`${API_BASE}/v1/journal/entries`, {
+      method: 'POST',
+      credentials: 'include',
+      body: fd,
     });
-    if (r.status === 404) return null;
-    if (!r.ok) {
-      const body = await r.text();
-      throw new Error(`GET ${path}: ${r.status} — ${body.slice(0, 200)}`);
+    if (r.status === 401) {
+      window.location.href = APEX;
+      throw new Error('not signed in');
     }
-    const j = await r.json();
-    const bytes = Uint8Array.from(atob(j.content.replace(/\n/g, '')), (c) => c.charCodeAt(0));
-    const text = new TextDecoder('utf-8').decode(bytes);
-    return { text, sha: j.sha };
-  }
-
-  async function ghPutText(path, text, sha, message) {
-    const bytes = new TextEncoder().encode(text);
-    let bin = '';
-    for (const b of bytes) bin += String.fromCharCode(b);
-    return ghPutB64(path, btoa(bin), sha, message);
-  }
-
-  async function ghPutBlob(path, blob, message) {
-    const buf = await blob.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let bin = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-    }
-    return ghPutB64(path, btoa(bin), null, message);
-  }
-
-  async function ghPutB64(path, b64, sha, message) {
-    const body = { message, content: b64, branch: CFG.branch };
-    if (sha) body.sha = sha;
-    const r = await fetch(`${API}/contents/${path}`, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${state.pat}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
     if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      const e = new Error(`PUT ${path}: ${r.status} — ${err.message || 'unknown'}`);
-      e.status = r.status;
-      throw e;
+      const err = await r.text().catch(() => '');
+      throw new Error(`POST entries: ${r.status} — ${err.slice(0, 200)}`);
     }
     return r.json();
+  }
+
+  async function logout() {
+    try {
+      await fetch(`${API_BASE}/v1/auth/logout`, { method: 'POST', credentials: 'include' });
+    } catch (err) { console.warn('logout failed:', err.message); }
+    window.location.href = APEX;
   }
 
   // ====== ENTRY CREATION ======
@@ -114,53 +78,36 @@
     savePending();
     renderPending();
     toast(`Saved (queued, ${state.pending.length})`, 'ok');
+    sync();
   }
 
   function queueVoice(blob, mime, ext) {
-    const ts = nowIso();
-    const filename = `${fileSafeIso()}.${ext}`;
-    const audioPath = `${CFG.audioDir}/${filename}`;
-    const entry = { ts, local_date: localDate(), kind: 'voice', audio: audioPath };
-    state.pending.push({ kind: 'voice', entry, audioBlob: blob, audioName: filename, audioMime: mime });
+    const entry = { ts: nowIso(), local_date: localDate(), kind: 'voice', body: '' };
+    const audioName = `rec.${ext}`;
+    state.pending.push({ kind: 'voice', entry, audioBlob: blob, audioName, audioMime: mime });
     savePending();
     renderPending();
     toast(`Recorded ${(blob.size / 1024).toFixed(0)} KB (queued)`, 'ok');
+    sync();
   }
 
   // ====== SYNC ======
   async function sync() {
-    if (!state.pat) { openSettings(); toast('Add a PAT first', 'error'); return; }
-    if (state.pending.length === 0) { toast('Nothing to sync', 'ok'); return; }
-
+    if (state.pending.length === 0) { return; }
     setSyncing(true);
-    try {
-      // 1) Upload any pending audio blobs first (independent files; no sha conflict possible).
-      for (const p of state.pending) {
-        if (p.kind === 'voice' && p.audioBlob) {
-          await ghPutBlob(`${CFG.audioDir}/${p.audioName}`, p.audioBlob, `journal: voice ${p.audioName}`);
-          delete p.audioBlob; // free memory
-        }
-      }
-
-      // 2) Fetch current entries.jsonl, append, PUT back. Single file = single sha race.
-      const cur = await ghGet(CFG.entriesPath);
-      const existing = cur ? cur.text : '';
-      const sha = cur ? cur.sha : null;
-      const appended = state.pending.map((p) => JSON.stringify(p.entry)).join('\n') + '\n';
-      const next = (existing && !existing.endsWith('\n') ? existing + '\n' : existing) + appended;
-      const n = state.pending.length;
-      await ghPutText(CFG.entriesPath, next, sha, `journal: +${n} entries`);
-
-      state.pending = [];
-      savePending();
-      renderPending();
-      toast(`Synced ${n}`, 'ok');
-    } catch (err) {
-      console.error(err);
-      toast(err.message || 'Sync failed', 'error');
-    } finally {
-      setSyncing(false);
+    const survivors = [];
+    let n = 0;
+    for (const p of state.pending) {
+      try { await postEntry(p); n++; }
+      catch (err) { survivors.push(p); console.error(err); }
     }
+    state.pending = survivors;
+    savePending();
+    renderPending();
+    setSyncing(false);
+    if (n > 0 && survivors.length === 0) toast(`Synced ${n}`, 'ok');
+    else if (n > 0) toast(`Synced ${n}, ${survivors.length} failed`, 'error');
+    else if (survivors.length > 0) toast(`Sync failed (${survivors.length} pending)`, 'error');
   }
 
   // ====== RECORDING ======
@@ -175,7 +122,7 @@
     for (const [m, ext] of candidates) {
       if (MediaRecorder.isTypeSupported(m)) return { mime: m, ext };
     }
-    return { mime: '', ext: 'webm' }; // browser default
+    return { mime: '', ext: 'webm' };
   }
 
   async function startRecording() {
@@ -254,6 +201,14 @@
     }
   }
 
+  function renderMe() {
+    const el = document.getElementById('me-view');
+    if (!el) return;
+    el.textContent = state.me
+      ? `${state.me.display_name || state.me.email}`
+      : 'not signed in';
+  }
+
   function toast(msg, kind) {
     const el = document.getElementById('toast');
     el.textContent = msg;
@@ -264,13 +219,30 @@
   }
 
   function openSettings() {
-    document.getElementById('pat-input').value = state.pat;
     document.getElementById('settings').hidden = false;
     renderPending();
+    renderMe();
   }
-
   function closeSettings() {
     document.getElementById('settings').hidden = true;
+  }
+
+  // ====== AUTH GATE ======
+  async function checkAuth() {
+    try {
+      const me = await fetchMe();
+      if (me === null) {
+        window.location.href = APEX;
+        return false;
+      }
+      state.me = me;
+      renderMe();
+      return true;
+    } catch (err) {
+      // Network error — let the user keep writing offline; sync will surface 401 later.
+      console.warn('auth check failed:', err.message);
+      return true;
+    }
   }
 
   // ====== WIRING ======
@@ -290,19 +262,7 @@
     document.getElementById('sync-btn').addEventListener('click', () => { sync(); });
     document.getElementById('settings-btn').addEventListener('click', openSettings);
     document.getElementById('settings-close').addEventListener('click', closeSettings);
-
-    document.getElementById('pat-save').addEventListener('click', () => {
-      const v = document.getElementById('pat-input').value.trim();
-      savePat(v);
-      toast(v ? 'Token saved' : 'Token cleared', 'ok');
-      closeSettings();
-    });
-
-    document.getElementById('pat-clear').addEventListener('click', () => {
-      savePat('');
-      document.getElementById('pat-input').value = '';
-      toast('Token cleared', 'ok');
-    });
+    document.getElementById('signout-btn').addEventListener('click', logout);
 
     document.getElementById('pending-clear').addEventListener('click', () => {
       if (!confirm(`Discard ${state.pending.length} pending entries without syncing?`)) return;
@@ -312,14 +272,17 @@
       toast('Pending cleared', 'ok');
     });
 
-    // Service worker
+    window.addEventListener('online', () => { sync(); });
+
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
     bind();
     renderPending();
+    const ok = await checkAuth();
+    if (ok) sync();
   });
 })();
