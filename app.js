@@ -378,9 +378,11 @@
   }
 
   function renderMe() {
-    const el = document.getElementById('me-view');
-    if (!el) return;
-    el.textContent = state.me ? `${state.me.display_name || state.me.email}` : 'not signed in';
+    const label = state.me ? (state.me.display_name || state.me.email) : 'not signed in';
+    const settingsEl = document.getElementById('me-view');
+    if (settingsEl) settingsEl.textContent = label;
+    const headerEl = document.getElementById('me-label');
+    if (headerEl) headerEl.textContent = label;
   }
 
   function toast(msg, kind) {

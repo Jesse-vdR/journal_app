@@ -3,39 +3,47 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#111">
+  <meta name="theme-color" content="#0a0b10">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Journal</title>
+  <title>journal — Jesse</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" type="image/png" href="icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0b10'/%3E%3Ccircle cx='16' cy='16' r='5' fill='url(%23g)'/%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%237c3aed'/%3E%3Cstop offset='1' stop-color='%23f59e0b'/%3E%3C/linearGradient%3E%3C/defs%3E%3C/svg%3E">
   <link rel="apple-touch-icon" href="icon-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <header class="page-header">
+    <p class="eyebrow"><span class="dot"></span>JESSE</p>
+    <h1>journal</h1>
+    <nav class="auth">
+      <a href="https://jesselab.space/" class="nav-link">← home</a>
+      <span id="me-label" class="me-label">—</span>
+      <a href="https://jesselab.space/profile" class="nav-link">profile</a>
+    </nav>
+  </header>
+
   <main id="app">
     <section id="view-list" hidden>
-      <header class="view-header">
-        <h2>Journal</h2>
-      </header>
+      <h2 class="section-h">dates</h2>
       <ul id="dates-list"></ul>
-      <p id="dates-empty" class="muted" hidden>No entries yet — tap Today to start.</p>
+      <p id="dates-empty" class="muted" hidden>No entries yet — tap today to start.</p>
       <div class="row">
-        <button id="open-today">Today</button>
+        <button id="open-today" class="btn-primary">today</button>
       </div>
     </section>
 
     <section id="view-detail" hidden>
-      <header class="view-header">
-        <button id="detail-back" class="back-btn">‹ Dates</button>
-        <h2 id="detail-title">—</h2>
-      </header>
+      <div class="view-header">
+        <button id="detail-back" class="back-btn">‹ dates</button>
+        <h2 id="detail-title" class="section-h">—</h2>
+      </div>
       <div id="detail-voice"></div>
-      <textarea id="detail-text" placeholder="Type something…" autocomplete="off" spellcheck="true"></textarea>
+      <textarea id="detail-text" placeholder="type something…" autocomplete="off" spellcheck="true"></textarea>
       <div class="row">
-        <button id="detail-save" class="primary">Save</button>
-        <button id="rec-btn">● Record</button>
+        <button id="detail-save" class="btn-primary">save</button>
+        <button id="rec-btn" class="btn-secondary">● record</button>
       </div>
       <div id="rec-status" hidden>
         <span class="rec-dot"></span>
@@ -45,24 +53,24 @@
   </main>
 
   <div id="sync-bar">
-    <button id="sync-btn">Sync</button>
-    <button id="settings-btn" title="Settings">⚙</button>
+    <button id="sync-btn">sync</button>
+    <button id="settings-btn" title="settings">⚙</button>
   </div>
 
   <div id="settings" hidden>
-    <h2>Settings</h2>
+    <h2 class="section-h">settings</h2>
 
-    <h3>Signed in as</h3>
-    <p id="me-view" class="help">—</p>
+    <h3 class="sub-h">signed in as</h3>
+    <p id="me-view" class="muted">—</p>
     <div class="row">
-      <button id="signout-btn" class="danger">Sign out</button>
-      <button id="settings-close">Close</button>
+      <button id="signout-btn" class="btn-danger">sign out</button>
+      <button id="settings-close" class="btn-secondary">close</button>
     </div>
 
-    <h3>Pending</h3>
+    <h3 class="sub-h">pending</h3>
     <pre id="pending-view">—</pre>
     <div class="row">
-      <button id="pending-clear" class="danger">Discard pending (no sync)</button>
+      <button id="pending-clear" class="btn-danger">discard pending (no sync)</button>
     </div>
   </div>
 
