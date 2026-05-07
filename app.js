@@ -1,3 +1,5 @@
+import { Shell } from "/shell/shell.js";
+
 // ====== CONFIG ======
   const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:8000'
@@ -443,6 +445,11 @@
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
+    Shell.mount({
+      mode: "subapp",
+      apiBase: API_BASE,
+      homeUrl: "https://jesselab.space/",
+    });
     bind();
     renderPending();
     await sync();
