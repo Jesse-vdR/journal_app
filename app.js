@@ -1,7 +1,4 @@
-(() => {
-  'use strict';
-
-  // ====== CONFIG ======
+// ====== CONFIG ======
   const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:8000'
     : 'https://api.jesselab.space';
@@ -16,7 +13,6 @@
     lastSaved: '',               // last persisted text-block for the open date — used to skip blur saves when clean
     pending: loadPending(),      // queue of {kind, entry, audioBlob?, audioName?, audioMime?}
     recording: null,
-    me: null,
   };
 
   // ====== STORAGE ======
@@ -55,13 +51,6 @@
       throw new Error('not signed in');
     }
     return r;
-  }
-
-  async function fetchMe() {
-    const r = await fetch(`${API_BASE}/v1/me`, { credentials: 'include' });
-    if (r.status === 401) return null;
-    if (!r.ok) throw new Error(`/v1/me: ${r.status}`);
-    return r.json();
   }
 
   async function fetchDates() {
@@ -392,23 +381,6 @@
     }
   }
 
-  function renderMe() {
-    const label = state.me ? (state.me.display_name || state.me.email) : 'not signed in';
-    const settingsEl = document.getElementById('me-view');
-    if (settingsEl) settingsEl.textContent = label;
-    const headerEl = document.getElementById('me-label');
-    if (headerEl) headerEl.textContent = label;
-    const avatar = document.getElementById('me-avatar');
-    if (avatar) {
-      if (state.me?.avatar_url) {
-        avatar.src = state.me.avatar_url;
-        avatar.hidden = false;
-      } else {
-        avatar.hidden = true;
-      }
-    }
-  }
-
   function toast(msg, kind) {
     const el = document.getElementById('toast');
     el.textContent = msg;
@@ -418,30 +390,22 @@
     toast._t = setTimeout(() => { el.hidden = true; }, 2400);
   }
 
-  function openSettings() {
-    document.getElementById('settings').hidden = false;
+  async function openSettings() {
+    const settings = document.getElementById('settings');
+    settings.hidden = false;
+    // Populate "signed in as" lazily — shell topbar handles the main display.
+    try {
+      const r = await fetch(`${API_BASE}/v1/me`, { credentials: 'include' });
+      if (r.ok) {
+        const me = await r.json();
+        const display = me.display_name || me.email;
+        document.getElementById('me-view').textContent = `${display} (${me.email})`;
+      }
+    } catch { /* offline — leave em-dash */ }
     renderPending();
-    renderMe();
   }
   function closeSettings() {
     document.getElementById('settings').hidden = true;
-  }
-
-  // ====== AUTH ======
-  async function checkAuth() {
-    try {
-      const me = await fetchMe();
-      if (me === null) {
-        window.location.href = APEX;
-        return false;
-      }
-      state.me = me;
-      renderMe();
-      return true;
-    } catch (err) {
-      console.warn('auth check failed:', err.message);
-      return true;
-    }
   }
 
   // ====== WIRING ======
@@ -462,7 +426,6 @@
     document.getElementById('settings-btn').addEventListener('click', openSettings);
     document.getElementById('settings-close').addEventListener('click', closeSettings);
     document.getElementById('signout-btn').addEventListener('click', logout);
-    document.getElementById('topbar-signout').addEventListener('click', logout);
 
     document.getElementById('pending-clear').addEventListener('click', () => {
       if (!confirm(`Discard ${state.pending.length} pending entries without syncing?`)) return;
@@ -482,10 +445,8 @@
   document.addEventListener('DOMContentLoaded', async () => {
     bind();
     renderPending();
-    const ok = await checkAuth();
-    if (!ok) return;
     await sync();
     await showDetail(localDateStr());
     await populateList();
   });
-})();
+
