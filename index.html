@@ -15,15 +15,33 @@
 </head>
 <body>
   <main id="app">
-    <textarea id="entry" placeholder="Type something…" autocomplete="off" spellcheck="true"></textarea>
-    <div class="row">
-      <button id="save-btn" class="primary">Save</button>
-      <button id="rec-btn">● Record</button>
-    </div>
-    <div id="rec-status" hidden>
-      <span class="rec-dot"></span>
-      <span id="rec-time">0:00</span>
-    </div>
+    <section id="view-list" hidden>
+      <header class="view-header">
+        <h2>Journal</h2>
+      </header>
+      <ul id="dates-list"></ul>
+      <p id="dates-empty" class="muted" hidden>No entries yet — tap Today to start.</p>
+      <div class="row">
+        <button id="open-today">Today</button>
+      </div>
+    </section>
+
+    <section id="view-detail" hidden>
+      <header class="view-header">
+        <button id="detail-back" class="back-btn">‹ Dates</button>
+        <h2 id="detail-title">—</h2>
+      </header>
+      <div id="detail-voice"></div>
+      <textarea id="detail-text" placeholder="Type something…" autocomplete="off" spellcheck="true"></textarea>
+      <div class="row">
+        <button id="detail-save" class="primary">Save</button>
+        <button id="rec-btn">● Record</button>
+      </div>
+      <div id="rec-status" hidden>
+        <span class="rec-dot"></span>
+        <span id="rec-time">0:00</span>
+      </div>
+    </section>
   </main>
 
   <div id="sync-bar">

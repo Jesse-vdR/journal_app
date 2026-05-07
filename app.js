@@ -9,9 +9,14 @@
 
   // ====== STATE ======
   const state = {
-    pending: loadPending(),     // queue of {kind, entry, audioBlob?, audioName?, audioMime?}
-    recording: null,            // {recorder, chunks, mime, ext, startedAt, timerId}
-    me: null,                   // {user_id, email, display_name} once signed in
+    view: 'list',                // 'list' | 'detail'
+    currentDate: null,           // 'YYYY-MM-DD' when view === 'detail'
+    dates: [],                   // [{date, count}, ...] desc
+    entries: [],                 // entries for currentDate, asc by ts
+    lastSaved: '',               // last persisted text-block for the open date — used to skip blur saves when clean
+    pending: loadPending(),      // queue of {kind, entry, audioBlob?, audioName?, audioMime?}
+    recording: null,
+    me: null,
   };
 
   // ====== STORAGE ======
@@ -20,24 +25,70 @@
     catch { return []; }
   }
   function savePending() {
-    // Audio blobs can't be JSON-serialized — text-only items survive a reload.
     const persistable = state.pending.filter((p) => p.kind === 'text');
     localStorage.setItem('pending', JSON.stringify(persistable));
   }
 
   // ====== DATE HELPERS ======
   function nowIso() { return new Date().toISOString(); }
-  function localDate() {
-    const d = new Date();
+  function localDateStr(d = new Date()) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function humanDate(yyyymmdd) {
+    const today = localDateStr();
+    if (yyyymmdd === today) return `Today · ${yyyymmdd}`;
+    const d = new Date(yyyymmdd + 'T00:00:00');
+    const yest = new Date(); yest.setDate(yest.getDate() - 1);
+    if (yyyymmdd === localDateStr(yest)) return `Yesterday · ${yyyymmdd}`;
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  function timeOfDay(isoTs) {
+    const d = new Date(isoTs);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
   // ====== API ======
+  async function apiFetch(path, opts = {}) {
+    const r = await fetch(`${API_BASE}${path}`, { credentials: 'include', ...opts });
+    if (r.status === 401) {
+      window.location.href = APEX;
+      throw new Error('not signed in');
+    }
+    return r;
+  }
+
   async function fetchMe() {
     const r = await fetch(`${API_BASE}/v1/me`, { credentials: 'include' });
     if (r.status === 401) return null;
     if (!r.ok) throw new Error(`/v1/me: ${r.status}`);
     return r.json();
+  }
+
+  async function fetchDates() {
+    const r = await apiFetch('/v1/journal/dates');
+    if (!r.ok) throw new Error(`GET dates: ${r.status}`);
+    return r.json();
+  }
+
+  async function fetchEntries(date) {
+    const r = await apiFetch(`/v1/journal/entries?date=${date}`);
+    if (!r.ok) throw new Error(`GET entries: ${r.status}`);
+    return r.json();
+  }
+
+  async function patchEntry(id, body) {
+    const r = await apiFetch(`/v1/journal/entries/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+    if (!r.ok) throw new Error(`PATCH entries/${id}: ${r.status}`);
+    return r.json();
+  }
+
+  async function deleteEntry(id) {
+    const r = await apiFetch(`/v1/journal/entries/${id}`, { method: 'DELETE' });
+    if (!r.ok && r.status !== 204) throw new Error(`DELETE entries/${id}: ${r.status}`);
   }
 
   async function postEntry(p) {
@@ -47,15 +98,7 @@
     fd.set('local_date', p.entry.local_date);
     if (p.entry.body) fd.set('body', p.entry.body);
     if (p.audioBlob) fd.append('audio', p.audioBlob, p.audioName);
-    const r = await fetch(`${API_BASE}/v1/journal/entries`, {
-      method: 'POST',
-      credentials: 'include',
-      body: fd,
-    });
-    if (r.status === 401) {
-      window.location.href = APEX;
-      throw new Error('not signed in');
-    }
+    const r = await apiFetch('/v1/journal/entries', { method: 'POST', body: fd });
     if (!r.ok) {
       const err = await r.text().catch(() => '');
       throw new Error(`POST entries: ${r.status} — ${err.slice(0, 200)}`);
@@ -70,19 +113,18 @@
     window.location.href = APEX;
   }
 
-  // ====== ENTRY CREATION ======
-  function queueText(body) {
+  // ====== ENTRY CREATION (offline queue) ======
+  function queueText(body, dateStr) {
     if (!body.trim()) return;
-    const entry = { ts: nowIso(), local_date: localDate(), kind: 'text', body };
+    const entry = { ts: nowIso(), local_date: dateStr, kind: 'text', body };
     state.pending.push({ kind: 'text', entry });
     savePending();
     renderPending();
-    toast(`Saved (queued, ${state.pending.length})`, 'ok');
     sync();
   }
 
-  function queueVoice(blob, mime, ext) {
-    const entry = { ts: nowIso(), local_date: localDate(), kind: 'voice', body: '' };
+  function queueVoice(blob, mime, ext, dateStr) {
+    const entry = { ts: nowIso(), local_date: dateStr, kind: 'voice', body: '' };
     const audioName = `rec.${ext}`;
     state.pending.push({ kind: 'voice', entry, audioBlob: blob, audioName, audioMime: mime });
     savePending();
@@ -93,7 +135,7 @@
 
   // ====== SYNC ======
   async function sync() {
-    if (state.pending.length === 0) { return; }
+    if (state.pending.length === 0) return;
     setSyncing(true);
     const survivors = [];
     let n = 0;
@@ -108,6 +150,7 @@
     if (n > 0 && survivors.length === 0) toast(`Synced ${n}`, 'ok');
     else if (n > 0) toast(`Synced ${n}, ${survivors.length} failed`, 'error');
     else if (survivors.length > 0) toast(`Sync failed (${survivors.length} pending)`, 'error');
+    if (n > 0 && state.view === 'detail') await reloadDetail();
   }
 
   // ====== RECORDING ======
@@ -133,7 +176,7 @@
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
+    } catch {
       toast('Mic permission denied', 'error');
       return;
     }
@@ -141,11 +184,12 @@
     const opts = pick.mime ? { mimeType: pick.mime } : {};
     const recorder = new MediaRecorder(stream, opts);
     const chunks = [];
+    const dateForRecording = state.currentDate || localDateStr();
     recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
     recorder.onstop = () => {
       const blob = new Blob(chunks, { type: pick.mime || 'audio/webm' });
       stream.getTracks().forEach((t) => t.stop());
-      queueVoice(blob, pick.mime || 'audio/webm', pick.ext);
+      queueVoice(blob, pick.mime || 'audio/webm', pick.ext, dateForRecording);
       state.recording = null;
       updateRecordingUI();
     };
@@ -168,6 +212,7 @@
     const status = document.getElementById('rec-status');
     const time = document.getElementById('rec-time');
     const btn = document.getElementById('rec-btn');
+    if (!btn) return;
     if (state.recording) {
       const sec = Math.floor((Date.now() - state.recording.startedAt) / 1000);
       const m = Math.floor(sec / 60);
@@ -183,11 +228,142 @@
     }
   }
 
+  // ====== VIEW: LIST ======
+  async function showList() {
+    state.view = 'list';
+    state.currentDate = null;
+    document.getElementById('view-list').hidden = false;
+    document.getElementById('view-detail').hidden = true;
+
+    const ul = document.getElementById('dates-list');
+    const empty = document.getElementById('dates-empty');
+    ul.innerHTML = '';
+    try {
+      state.dates = await fetchDates();
+    } catch (err) {
+      toast(`Could not load dates: ${err.message}`, 'error');
+      return;
+    }
+    if (state.dates.length === 0) {
+      empty.hidden = false;
+      return;
+    }
+    empty.hidden = true;
+    for (const d of state.dates) {
+      const li = document.createElement('li');
+      li.className = 'date-item';
+      li.tabIndex = 0;
+      li.innerHTML = `<span class="date-label">${humanDate(d.date)}</span><span class="date-count">${d.count}</span>`;
+      li.addEventListener('click', () => showDetail(d.date));
+      li.addEventListener('keydown', (e) => { if (e.key === 'Enter') showDetail(d.date); });
+      ul.appendChild(li);
+    }
+  }
+
+  // ====== VIEW: DETAIL ======
+  async function showDetail(dateStr) {
+    state.view = 'detail';
+    state.currentDate = dateStr;
+    document.getElementById('view-list').hidden = true;
+    document.getElementById('view-detail').hidden = false;
+    document.getElementById('detail-title').textContent = humanDate(dateStr);
+    await reloadDetail();
+  }
+
+  async function reloadDetail() {
+    if (state.view !== 'detail' || !state.currentDate) return;
+    try {
+      state.entries = await fetchEntries(state.currentDate);
+    } catch (err) {
+      toast(`Could not load entries: ${err.message}`, 'error');
+      state.entries = [];
+    }
+    renderDetailVoice();
+    const text = textBlock(state.entries);
+    state.lastSaved = text;
+    const ta = document.getElementById('detail-text');
+    ta.value = text;
+  }
+
+  function textBlock(entries) {
+    return entries
+      .filter((e) => e.kind === 'text' && e.body)
+      .map((e) => e.body)
+      .join('\n\n');
+  }
+
+  function renderDetailVoice() {
+    const host = document.getElementById('detail-voice');
+    host.innerHTML = '';
+    const voice = state.entries.filter((e) => e.kind === 'voice');
+    if (voice.length === 0) return;
+    for (const e of voice) {
+      const card = document.createElement('div');
+      card.className = 'voice-chip';
+      const head = `<div class="voice-head"><span class="voice-time">${timeOfDay(e.ts)}</span><span class="voice-icon">🎤</span></div>`;
+      const audio = e.audio_url
+        ? `<audio controls preload="none" crossorigin="use-credentials" src="${API_BASE}${e.audio_url}"></audio>`
+        : '';
+      const body = e.body ? `<div class="voice-body">${escapeHtml(e.body)}</div>` : '';
+      card.innerHTML = head + audio + body;
+      host.appendChild(card);
+    }
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+    );
+  }
+
+  // Save the textarea's content as the day's text block.
+  // 0 text entries on date → POST one; 1 → PATCH it; N>1 → PATCH most-recent + DELETE older.
+  // The merge-on-save is what keeps "one document per day" honest against an N-row schema.
+  let inFlightSave = null;
+  async function saveDetail() {
+    if (inFlightSave) return inFlightSave;
+    if (state.view !== 'detail' || !state.currentDate) return;
+    const ta = document.getElementById('detail-text');
+    const text = ta.value;
+    if (text === state.lastSaved) return;
+    setSaving(true);
+    inFlightSave = (async () => {
+      try {
+        const textEntries = state.entries.filter((e) => e.kind === 'text');
+        if (textEntries.length === 0) {
+          if (text.trim() === '') return;
+          await postEntry({ entry: { ts: nowIso(), local_date: state.currentDate, kind: 'text', body: text } });
+        } else if (textEntries.length === 1) {
+          await patchEntry(textEntries[0].id, text);
+        } else {
+          const latest = textEntries[textEntries.length - 1];
+          await patchEntry(latest.id, text);
+          for (const e of textEntries.slice(0, -1)) await deleteEntry(e.id);
+        }
+        state.lastSaved = text;
+        toast('Saved', 'ok');
+        await reloadDetail();
+      } catch (err) {
+        toast(`Save failed: ${err.message}`, 'error');
+      } finally {
+        setSaving(false);
+      }
+    })();
+    try { return await inFlightSave; } finally { inFlightSave = null; }
+  }
+
   // ====== UI ======
   function setSyncing(on) {
     const btn = document.getElementById('sync-btn');
     btn.disabled = on;
     btn.textContent = on ? 'Syncing…' : `Sync${state.pending.length ? ' (' + state.pending.length + ')' : ''}`;
+  }
+
+  function setSaving(on) {
+    const btn = document.getElementById('detail-save');
+    if (!btn) return;
+    btn.disabled = on;
+    btn.textContent = on ? 'Saving…' : 'Save';
   }
 
   function renderPending() {
@@ -204,9 +380,7 @@
   function renderMe() {
     const el = document.getElementById('me-view');
     if (!el) return;
-    el.textContent = state.me
-      ? `${state.me.display_name || state.me.email}`
-      : 'not signed in';
+    el.textContent = state.me ? `${state.me.display_name || state.me.email}` : 'not signed in';
   }
 
   function toast(msg, kind) {
@@ -227,7 +401,7 @@
     document.getElementById('settings').hidden = true;
   }
 
-  // ====== AUTH GATE ======
+  // ====== AUTH ======
   async function checkAuth() {
     try {
       const me = await fetchMe();
@@ -239,7 +413,6 @@
       renderMe();
       return true;
     } catch (err) {
-      // Network error — let the user keep writing offline; sync will surface 401 later.
       console.warn('auth check failed:', err.message);
       return true;
     }
@@ -247,13 +420,13 @@
 
   // ====== WIRING ======
   function bind() {
-    document.getElementById('save-btn').addEventListener('click', () => {
-      const ta = document.getElementById('entry');
-      const body = ta.value;
-      if (!body.trim()) return;
-      queueText(body);
-      ta.value = '';
+    document.getElementById('detail-back').addEventListener('click', async () => {
+      await saveDetail();
+      await showList();
     });
+    document.getElementById('detail-save').addEventListener('click', saveDetail);
+    document.getElementById('detail-text').addEventListener('blur', saveDetail);
+    document.getElementById('open-today').addEventListener('click', () => showDetail(localDateStr()));
 
     document.getElementById('rec-btn').addEventListener('click', () => {
       if (state.recording) stopRecording(); else startRecording();
@@ -283,6 +456,8 @@
     bind();
     renderPending();
     const ok = await checkAuth();
-    if (ok) sync();
+    if (!ok) return;
+    await sync();
+    await showDetail(localDateStr());
   });
 })();
