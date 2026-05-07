@@ -14,14 +14,21 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <header class="topbar">
+    <a class="brand-link" href="https://jesselab.space/" title="Back to jesselab.space">
+      <span class="brand-arrow" aria-hidden="true">←</span>
+      <span class="brand">homepage</span>
+    </a>
+    <div class="user">
+      <img id="me-avatar" class="avatar" alt="" hidden>
+      <span id="me-label" class="user-name">—</span>
+      <button id="topbar-signout" class="btn-link" type="button">sign out</button>
+    </div>
+  </header>
+
   <header class="page-header">
     <p class="eyebrow"><span class="dot"></span>JESSE</p>
     <h1>journal</h1>
-    <nav class="auth">
-      <a href="https://jesselab.space/" class="nav-link">← home</a>
-      <span id="me-label" class="me-label">—</span>
-      <a href="https://jesselab.space/profile" class="nav-link">profile</a>
-    </nav>
   </header>
 
   <main id="app">
