@@ -229,12 +229,7 @@
   }
 
   // ====== VIEW: LIST ======
-  async function showList() {
-    state.view = 'list';
-    state.currentDate = null;
-    document.getElementById('view-list').hidden = false;
-    document.getElementById('view-detail').hidden = true;
-
+  async function populateList() {
     const ul = document.getElementById('dates-list');
     const empty = document.getElementById('dates-empty');
     ul.innerHTML = '';
@@ -253,11 +248,29 @@
       const li = document.createElement('li');
       li.className = 'date-item';
       li.tabIndex = 0;
+      li.dataset.date = d.date;
       li.innerHTML = `<span class="date-label">${humanDate(d.date)}</span><span class="date-count">${d.count}</span>`;
       li.addEventListener('click', () => showDetail(d.date));
       li.addEventListener('keydown', (e) => { if (e.key === 'Enter') showDetail(d.date); });
       ul.appendChild(li);
     }
+    markActiveDate();
+  }
+
+  function markActiveDate() {
+    const ul = document.getElementById('dates-list');
+    if (!ul) return;
+    for (const el of ul.querySelectorAll('.date-item')) {
+      el.classList.toggle('is-active', el.dataset.date === state.currentDate);
+    }
+  }
+
+  async function showList() {
+    state.view = 'list';
+    state.currentDate = null;
+    document.getElementById('view-list').hidden = false;
+    document.getElementById('view-detail').hidden = true;
+    await populateList();
   }
 
   // ====== VIEW: DETAIL ======
@@ -267,6 +280,7 @@
     document.getElementById('view-list').hidden = true;
     document.getElementById('view-detail').hidden = false;
     document.getElementById('detail-title').textContent = humanDate(dateStr);
+    markActiveDate();
     await reloadDetail();
   }
 
@@ -343,6 +357,7 @@
         state.lastSaved = text;
         toast('Saved', 'ok');
         await reloadDetail();
+        await populateList();
       } catch (err) {
         toast(`Save failed: ${err.message}`, 'error');
       } finally {
@@ -461,5 +476,6 @@
     if (!ok) return;
     await sync();
     await showDetail(localDateStr());
+    await populateList();
   });
 })();
