@@ -98,19 +98,20 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 #rec-status {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.65rem;
+  gap: var(--space-2);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
+  padding: var(--space-3) 0;
 }
-.rec-dot {
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  background: var(--danger);
-  animation: pulse 1.2s ease-in-out infinite;
+#rec-status #rec-time {
+  font: 200 var(--t-hero) / 1 var(--font-sans);
+  letter-spacing: -0.04em;
+  color: var(--fg);
+  font-feature-settings: "tnum";
 }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
 /* ===== DATES LIST ===== */
 #dates-list {
