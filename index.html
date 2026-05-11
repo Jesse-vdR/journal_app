@@ -39,6 +39,17 @@
       <h2 id="detail-title" class="section-h">—</h2>
     </div>
     <div id="detail-voice"></div>
+    <div id="voice-preview" hidden>
+      <div class="preview-head">
+        <span class="voice-icon">🎤</span>
+        <span id="preview-status">transcribing…</span>
+      </div>
+      <textarea id="preview-text" placeholder="transcript" autocomplete="off" spellcheck="true"></textarea>
+      <div class="row">
+        <button id="preview-save" class="btn-primary" disabled>save voice</button>
+        <button id="preview-cancel" class="btn-secondary">cancel</button>
+      </div>
+    </div>
     <textarea id="detail-text" placeholder="type something…" autocomplete="off" spellcheck="true"></textarea>
     <div class="row">
       <button id="detail-save" class="btn-primary">save</button>

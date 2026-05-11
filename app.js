@@ -13,8 +13,9 @@ import { Shell } from "/shell/shell.js";
     dates: [],                   // [{date, count}, ...] desc
     entries: [],                 // entries for currentDate, asc by ts
     lastSaved: '',               // last persisted text-block for the open date — used to skip blur saves when clean
-    pending: loadPending(),      // queue of {kind, entry, audioBlob?, audioName?, audioMime?}
+    pending: loadPending(),      // queue of {kind, entry} — text only
     recording: null,
+    preview: null,               // {blob, mime, ext, dateForRecording, transcribing}
   };
 
   // ====== STORAGE ======
@@ -23,8 +24,7 @@ import { Shell } from "/shell/shell.js";
     catch { return []; }
   }
   function savePending() {
-    const persistable = state.pending.filter((p) => p.kind === 'text');
-    localStorage.setItem('pending', JSON.stringify(persistable));
+    localStorage.setItem('pending', JSON.stringify(state.pending));
   }
 
   // ====== DATE HELPERS ======
@@ -97,21 +97,23 @@ import { Shell } from "/shell/shell.js";
     return r.json();
   }
 
+  async function postTranscribe(blob, name) {
+    const fd = new FormData();
+    fd.append('audio', blob, name);
+    const r = await apiFetch('/v1/journal/transcribe', { method: 'POST', body: fd });
+    if (!r.ok) {
+      const err = await r.text().catch(() => '');
+      throw new Error(`transcribe: ${r.status} — ${err.slice(0, 200)}`);
+    }
+    return r.json();
+  }
+
   // ====== ENTRY CREATION (offline queue) ======
   function queueText(body, dateStr) {
     if (!body.trim()) return;
     const entry = { ts: nowIso(), local_date: dateStr, kind: 'text', body };
     state.pending.push({ kind: 'text', entry });
     savePending();
-    sync();
-  }
-
-  function queueVoice(blob, mime, ext, dateStr) {
-    const entry = { ts: nowIso(), local_date: dateStr, kind: 'voice', body: '' };
-    const audioName = `rec.${ext}`;
-    state.pending.push({ kind: 'voice', entry, audioBlob: blob, audioName, audioMime: mime });
-    savePending();
-    toast(`Recorded ${(blob.size / 1024).toFixed(0)} KB (queued)`, 'ok');
     sync();
   }
 
@@ -168,9 +170,9 @@ import { Shell } from "/shell/shell.js";
     recorder.onstop = () => {
       const blob = new Blob(chunks, { type: pick.mime || 'audio/webm' });
       stream.getTracks().forEach((t) => t.stop());
-      queueVoice(blob, pick.mime || 'audio/webm', pick.ext, dateForRecording);
       state.recording = null;
       updateRecordingUI();
+      enterPreview(blob, pick.mime || 'audio/webm', pick.ext, dateForRecording);
     };
 
     state.recording = {
@@ -205,6 +207,78 @@ import { Shell } from "/shell/shell.js";
       btn.textContent = '● record';
       btn.classList.remove('recording');
     }
+  }
+
+  // ====== VOICE PREVIEW ======
+  async function enterPreview(blob, mime, ext, dateForRecording) {
+    state.preview = { blob, mime, ext, dateForRecording, transcribing: true };
+    const wrap = document.getElementById('voice-preview');
+    const ta = document.getElementById('preview-text');
+    const save = document.getElementById('preview-save');
+    const statusEl = document.getElementById('preview-status');
+    ta.value = '';
+    save.disabled = true;
+    statusEl.textContent = 'transcribing…';
+    wrap.hidden = false;
+    document.getElementById('rec-btn').disabled = true;
+
+    try {
+      const { transcript } = await postTranscribe(blob, `rec.${ext}`);
+      if (!state.preview) return;
+      ta.value = transcript || '';
+      statusEl.textContent = `${(blob.size / 1024).toFixed(0)} KB`;
+    } catch (err) {
+      if (!state.preview) return;
+      statusEl.textContent = 'transcribe failed — type manually';
+      toast(`Transcribe failed: ${err.message}`, 'error');
+    } finally {
+      if (state.preview) {
+        state.preview.transcribing = false;
+        save.disabled = false;
+        ta.focus();
+      }
+    }
+  }
+
+  function exitPreview() {
+    state.preview = null;
+    document.getElementById('voice-preview').hidden = true;
+    document.getElementById('preview-text').value = '';
+    document.getElementById('rec-btn').disabled = false;
+  }
+
+  async function savePreview() {
+    if (!state.preview || state.preview.transcribing) return;
+    const text = document.getElementById('preview-text').value;
+    const { blob, mime, ext, dateForRecording } = state.preview;
+    const save = document.getElementById('preview-save');
+    const cancel = document.getElementById('preview-cancel');
+    save.disabled = true;
+    save.textContent = 'saving…';
+    cancel.disabled = true;
+    try {
+      await postEntry({
+        entry: { ts: nowIso(), local_date: dateForRecording, kind: 'voice', body: text },
+        audioBlob: blob,
+        audioName: `rec.${ext}`,
+        audioMime: mime,
+      });
+      toast('Voice saved', 'ok');
+      exitPreview();
+      if (state.currentDate === dateForRecording) await reloadDetail();
+      await populateList();
+    } catch (err) {
+      toast(`Save failed: ${err.message}`, 'error');
+      save.disabled = false;
+      cancel.disabled = false;
+    } finally {
+      save.textContent = 'save voice';
+    }
+  }
+
+  function cancelPreview() {
+    if (!state.preview) return;
+    if (state.preview.transcribing || confirm('Discard this recording?')) exitPreview();
   }
 
   // ====== VIEW: LIST ======
@@ -398,6 +472,10 @@ import { Shell } from "/shell/shell.js";
   // ====== WIRING ======
   function bind() {
     document.getElementById('detail-back').addEventListener('click', async () => {
+      if (state.preview) {
+        if (!confirm('Discard this recording?')) return;
+        exitPreview();
+      }
       await saveDetail();
       await showList();
     });
@@ -407,8 +485,11 @@ import { Shell } from "/shell/shell.js";
     document.getElementById('open-today').addEventListener('click', () => showDetail(localDateStr()));
 
     document.getElementById('rec-btn').addEventListener('click', () => {
+      if (state.preview) return;
       if (state.recording) stopRecording(); else startRecording();
     });
+    document.getElementById('preview-save').addEventListener('click', savePreview);
+    document.getElementById('preview-cancel').addEventListener('click', cancelPreview);
 
     window.addEventListener('online', () => { sync(); });
 
