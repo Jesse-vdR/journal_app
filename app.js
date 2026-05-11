@@ -97,20 +97,12 @@ import { Shell } from "/shell/shell.js";
     return r.json();
   }
 
-  async function logout() {
-    try {
-      await fetch(`${API_BASE}/v1/auth/logout`, { method: 'POST', credentials: 'include' });
-    } catch (err) { console.warn('logout failed:', err.message); }
-    window.location.href = APEX;
-  }
-
   // ====== ENTRY CREATION (offline queue) ======
   function queueText(body, dateStr) {
     if (!body.trim()) return;
     const entry = { ts: nowIso(), local_date: dateStr, kind: 'text', body };
     state.pending.push({ kind: 'text', entry });
     savePending();
-    renderPending();
     sync();
   }
 
@@ -119,7 +111,6 @@ import { Shell } from "/shell/shell.js";
     const audioName = `rec.${ext}`;
     state.pending.push({ kind: 'voice', entry, audioBlob: blob, audioName, audioMime: mime });
     savePending();
-    renderPending();
     toast(`Recorded ${(blob.size / 1024).toFixed(0)} KB (queued)`, 'ok');
     sync();
   }
@@ -127,7 +118,6 @@ import { Shell } from "/shell/shell.js";
   // ====== SYNC ======
   async function sync() {
     if (state.pending.length === 0) return;
-    setSyncing(true);
     const survivors = [];
     let n = 0;
     for (const p of state.pending) {
@@ -136,8 +126,6 @@ import { Shell } from "/shell/shell.js";
     }
     state.pending = survivors;
     savePending();
-    renderPending();
-    setSyncing(false);
     if (n > 0 && survivors.length === 0) toast(`Synced ${n}`, 'ok');
     else if (n > 0) toast(`Synced ${n}, ${survivors.length} failed`, 'error');
     else if (survivors.length > 0) toast(`Sync failed (${survivors.length} pending)`, 'error');
@@ -391,28 +379,11 @@ import { Shell } from "/shell/shell.js";
   }
 
   // ====== UI ======
-  function setSyncing(on) {
-    const btn = document.getElementById('sync-btn');
-    btn.disabled = on;
-    btn.textContent = on ? 'syncing…' : `sync${state.pending.length ? ' (' + state.pending.length + ')' : ''}`;
-  }
-
   function setSaving(on) {
     const btn = document.getElementById('detail-save');
     if (!btn) return;
     btn.disabled = on;
     btn.textContent = on ? 'saving…' : 'save';
-  }
-
-  function renderPending() {
-    const btn = document.getElementById('sync-btn');
-    btn.textContent = `sync${state.pending.length ? ' (' + state.pending.length + ')' : ''}`;
-    const view = document.getElementById('pending-view');
-    if (view) {
-      view.textContent = state.pending.length === 0
-        ? '—'
-        : state.pending.map((p) => JSON.stringify(p.entry)).join('\n');
-    }
   }
 
   function toast(msg, kind) {
@@ -422,24 +393,6 @@ import { Shell } from "/shell/shell.js";
     el.hidden = false;
     clearTimeout(toast._t);
     toast._t = setTimeout(() => { el.hidden = true; }, 2400);
-  }
-
-  async function openSettings() {
-    const settings = document.getElementById('settings');
-    settings.hidden = false;
-    // Populate "signed in as" lazily — shell topbar handles the main display.
-    try {
-      const r = await fetch(`${API_BASE}/v1/me`, { credentials: 'include' });
-      if (r.ok) {
-        const me = await r.json();
-        const display = me.display_name || me.email;
-        document.getElementById('me-view').textContent = `${display} (${me.email})`;
-      }
-    } catch { /* offline — leave em-dash */ }
-    renderPending();
-  }
-  function closeSettings() {
-    document.getElementById('settings').hidden = true;
   }
 
   // ====== WIRING ======
@@ -457,19 +410,6 @@ import { Shell } from "/shell/shell.js";
       if (state.recording) stopRecording(); else startRecording();
     });
 
-    document.getElementById('sync-btn').addEventListener('click', () => { sync(); });
-    document.getElementById('settings-btn').addEventListener('click', openSettings);
-    document.getElementById('settings-close').addEventListener('click', closeSettings);
-    document.getElementById('signout-btn').addEventListener('click', logout);
-
-    document.getElementById('pending-clear').addEventListener('click', () => {
-      if (!confirm(`Discard ${state.pending.length} pending entries without syncing?`)) return;
-      state.pending = [];
-      savePending();
-      renderPending();
-      toast('Pending cleared', 'ok');
-    });
-
     window.addEventListener('online', () => { sync(); });
 
     if ('serviceWorker' in navigator) {
@@ -484,7 +424,6 @@ import { Shell } from "/shell/shell.js";
       homeUrl: "https://jesselab.space/",
     });
     bind();
-    renderPending();
     await sync();
     await showDetail(localDateStr());
     await populateList();
