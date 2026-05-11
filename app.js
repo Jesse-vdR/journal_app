@@ -210,11 +210,11 @@ import { Shell } from "/shell/shell.js";
       const s = String(sec % 60).padStart(2, '0');
       time.textContent = `${m}:${s}`;
       status.hidden = false;
-      btn.textContent = '■ Stop';
+      btn.textContent = '■ stop';
       btn.classList.add('recording');
     } else {
       status.hidden = true;
-      btn.textContent = '● Record';
+      btn.textContent = '● record';
       btn.classList.remove('recording');
     }
   }
@@ -288,6 +288,8 @@ import { Shell } from "/shell/shell.js";
     state.lastSaved = text;
     const ta = document.getElementById('detail-text');
     ta.value = text;
+    const hasTextEntry = state.entries.some((e) => e.kind === 'text');
+    document.getElementById('detail-delete').hidden = !hasTextEntry;
   }
 
   function textBlock(entries) {
@@ -305,13 +307,43 @@ import { Shell } from "/shell/shell.js";
     for (const e of voice) {
       const card = document.createElement('div');
       card.className = 'voice-chip';
-      const head = `<div class="voice-head"><span class="voice-time">${timeOfDay(e.ts)}</span><span class="voice-icon">🎤</span></div>`;
+      const head = `<div class="voice-head">
+        <span class="voice-head__left"><span class="voice-time">${timeOfDay(e.ts)}</span><span class="voice-icon">🎤</span></span>
+        <span class="voice-head__right"><button type="button" class="entry-delete" title="Delete recording" aria-label="Delete recording">×</button></span>
+      </div>`;
       const audio = e.audio_url
         ? `<audio controls preload="none" crossorigin="use-credentials" src="${API_BASE}${e.audio_url}"></audio>`
         : '';
       const body = e.body ? `<div class="voice-body">${escapeHtml(e.body)}</div>` : '';
       card.innerHTML = head + audio + body;
+      card.querySelector('.entry-delete').addEventListener('click', () => deleteVoice(e.id));
       host.appendChild(card);
+    }
+  }
+
+  async function deleteVoice(id) {
+    if (!confirm('Delete this recording?')) return;
+    try {
+      await deleteEntry(id);
+      toast('Recording deleted', 'ok');
+      await reloadDetail();
+      await populateList();
+    } catch (err) {
+      toast(`Delete failed: ${err.message}`, 'error');
+    }
+  }
+
+  async function deleteDayText() {
+    const textEntries = state.entries.filter((e) => e.kind === 'text');
+    if (textEntries.length === 0) return;
+    if (!confirm("Delete this day's text entry?")) return;
+    try {
+      for (const e of textEntries) await deleteEntry(e.id);
+      toast('Text deleted', 'ok');
+      await reloadDetail();
+      await populateList();
+    } catch (err) {
+      toast(`Delete failed: ${err.message}`, 'error');
     }
   }
 
@@ -362,19 +394,19 @@ import { Shell } from "/shell/shell.js";
   function setSyncing(on) {
     const btn = document.getElementById('sync-btn');
     btn.disabled = on;
-    btn.textContent = on ? 'Syncing…' : `Sync${state.pending.length ? ' (' + state.pending.length + ')' : ''}`;
+    btn.textContent = on ? 'syncing…' : `sync${state.pending.length ? ' (' + state.pending.length + ')' : ''}`;
   }
 
   function setSaving(on) {
     const btn = document.getElementById('detail-save');
     if (!btn) return;
     btn.disabled = on;
-    btn.textContent = on ? 'Saving…' : 'Save';
+    btn.textContent = on ? 'saving…' : 'save';
   }
 
   function renderPending() {
     const btn = document.getElementById('sync-btn');
-    btn.textContent = `Sync${state.pending.length ? ' (' + state.pending.length + ')' : ''}`;
+    btn.textContent = `sync${state.pending.length ? ' (' + state.pending.length + ')' : ''}`;
     const view = document.getElementById('pending-view');
     if (view) {
       view.textContent = state.pending.length === 0
@@ -417,6 +449,7 @@ import { Shell } from "/shell/shell.js";
       await showList();
     });
     document.getElementById('detail-save').addEventListener('click', saveDetail);
+    document.getElementById('detail-delete').addEventListener('click', deleteDayText);
     document.getElementById('detail-text').addEventListener('blur', saveDetail);
     document.getElementById('open-today').addEventListener('click', () => showDetail(localDateStr()));
 
